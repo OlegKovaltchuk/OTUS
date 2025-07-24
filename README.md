@@ -1,9 +1,46 @@
 # OTUS
 Administrator Linux. Professional
-установить и настроить ZFS
-root@kodotus01:~# apt install zfsutils-linux
+**Домашнее задание 4**
+
+Заходим на сервер: kod_otus 
+Дальнейшие действия выполняются от пользователя root. Переходим в
+root пользователя
+```
+oleg@kodotus01:~$ sudo -i
+```
+**1. Устанавливаем ZFS **
+
+Устанавливаем пакет zfsutils-linux
+```
+root@kodotusnfsserver:~# apt install zfsutils-linux
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  libnvpair3linux libuutil3linux libzfs4linux libzpool5linux zfs-zed
+Suggested packages:
+  nfs-kernel-server samba-common-bin zfs-initramfs | zfs-dracut
+The following NEW packages will be installed:
+  libnvpair3linux libuutil3linux libzfs4linux libzpool5linux zfs-zed zfsutils-linux
+0 upgraded, 6 newly installed, 0 to remove and 64 not upgraded.
+Need to get 2355 kB of archives.
+After this operation, 7399 kB of additional disk space will be used.
+Do you want to continue? [Y/n] y
+
+```
+Смотрим информацию о пулах
+
+```
 root@kodotus01:~# zpool list
 no pools available
+```
+
+
+**2. Определение алгоритма с наилучшим сжатием**
+
+Смотрим список всех дисков, которые есть в виртуальной машине:
+```
+
 root@kodotus01:~# lsblk
 NAME                      MAJ:MIN RM  SIZE RO TYPE  MOUNTPOINTS
 sda                         8:0    0   30G  0 disk
@@ -27,30 +64,64 @@ sdh                         8:112  0    1G  0 disk
 sdi                         8:128  0    1G  0 disk
 sdj                         8:144  0    1G  0 disk
 sdk                         8:160  0    1G  0 disk
-sr0                        11:0    1    3G  0 rom
 sdl                         8:176  0    1G  0 disk
 sdm                         8:192  0    1G  0 disk
 
+```
+
+Создаём четыре пула из двух дисков в режиме RAID 1:
+
+```
 root@kodotus01:~# zpool create test_otus1 mirror /dev/sdf  /dev/sdg
 root@kodotus01:~# zpool create test_otus2 mirror /dev/sdh  /dev/sdi
 root@kodotus01:~# zpool create test_otus3 mirror /dev/sdj  /dev/sdk 
 root@kodotus01:~# zpool create test_otus4 mirror /dev/sdl  /dev/sdm
+```
+
+Смотрим информацию о пулах: zpool list
+
+```
 root@kodotus01:/# zpool list
 NAME         SIZE  ALLOC   FREE  CKPOINT  EXPANDSZ   FRAG    CAP  DEDUP    HEALTH  ALTROOT
 test_otus1   960M   408K   960M        -         -     0%     0%  1.00x    ONLINE  -
 test_otus2   960M   492K   960M        -         -     0%     0%  1.00x    ONLINE  -
 test_otus3   960M   492K   960M        -         -     0%     0%  1.00x    ONLINE  -
 test_otus4   960M   372K   960M        -         -     0%     0%  1.00x    ONLINE  -
+```
+
+
+Добавим разные алгоритмы (lzjb, lz4, gzip-9, zle) сжатия в каждую файловую систему соответственно:
+
+```
 root@kodotus01:/# zfs set compression=lzjb test_otus1
 root@kodotus01:/# zfs set compression=lz4 test_otus2
 root@kodotus01:/# zfs set compression=gzip-9 test_otus3
 root@kodotus01:/# zfs set compression=zle test_otus4
+
+```
+
+Проверим, что все файловые системы имеют разные методы сжатия:
+
+```
 root@kodotus01:/# zfs get all | grep compression
 test_otus1  compression           lzjb                   local
 test_otus2  compression           lz4                    local
 test_otus3  compression           gzip-9                 local
 test_otus4  compression           zle                    local
+
+```
+
+Копируем один и тот же текстовый файл во все пулы:
+
+```
 root@kodotus01:/var/log# for i in {1..4}; do cp -r /var/log/auth.log.1 /test_otus$i; done
+
+```
+
+Проверим, что файл был скачан во все пулы:
+
+```
+
 root@kodotus01:/var/log# ls -l /test_otus*
 /test_otus:
 total 0
@@ -70,20 +141,32 @@ total 37
 /test_otus4:
 total 297
 -rw-r----- 1 root root 291852 Jul 15 21:05 auth.log.1
+```
+
+Проверим, сколько места занимает один и тот же файл в разных пулах
+и проверим степень сжатия файлов:
+
+```
 root@kodotus01:/var/log# zfs list
 NAME         USED  AVAIL  REFER  MOUNTPOINT
 test_otus1   584K   831M   152K  /test_otus1
 test_otus2   584K   831M   152K  /test_otus2
 test_otus3   552K   831M   132K  /test_otus3
 test_otus4   788K   831M   392K  /test_otus4
+
 root@kodotus01:/var/log# zfs get all | grep compressratio | grep -v ref
 test_otus1  compressratio         2.47x                  -
 test_otus2  compressratio         2.47x                  -
 test_otus3  compressratio         2.74x                  -
 test_otus4  compressratio         1.21x                  -
-root@kodotus01:/var/log#
+```
 
+**Таким образом, у нас получается, что алгоритм gzip-9 самый
+эффективный по сжатию.**
 
+Запрос сразу всех параметром файловой системы:
+
+```
 root@kodotus01:/# zfs get all test_otus1
 NAME        PROPERTY              VALUE                  SOURCE
 test_otus1  type                  filesystem             -
@@ -158,13 +241,45 @@ test_otus1  keylocation           none                   default
 test_otus1  keyformat             none                   default
 test_otus1  pbkdf2iters           0                      default
 test_otus1  special_small_blocks  0                      default
-root@kodotus01:/# zfs get available test_otus1
+
+```
+C помощью команды grep можно уточнить конкретный параметр,
+например:
+
+```
+root@kodotus01:~# zfs get available test_otus1
 NAME        PROPERTY   VALUE  SOURCE
 test_otus1  available  831M   -
-root@kodotus01:/# zfs get compression test_otus1
+
+```
+
+Тип:
+
+```
+root@kodotus01:~# zfs get readonly test_otus1
+NAME        PROPERTY  VALUE   SOURCE
+test_otus1  readonly  off     default
+```
+
+Значение recordsize
+```
+root@kodotus01:~# zfs get recordsize test_otus1
+NAME        PROPERTY    VALUE    SOURCE
+test_otus1  recordsize  128K     default
+
+```
+
+Тип сжатия (или параметр отключения):
+```
+root@kodotus01:~# zfs get compression test_otus1
 NAME        PROPERTY     VALUE           SOURCE
 test_otus1  compression  lzjb            local
-root@kodotus01:/# zfs get compression test_otus3
-NAME        PROPERTY     VALUE           SOURCE
-test_otus3  compression  gzip-9          local
+```
+
+Тип контрольной суммы:
+```
+root@kodotus01:~# zfs get checksum test_otus1
+NAME        PROPERTY  VALUE      SOURCE
+test_otus1  checksum  on         default
+```
 
