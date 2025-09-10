@@ -1,1 +1,567 @@
+**Домашнее задание 5**
 
+
+**1. Настраиваем сервер NFS**
+
+Заходим на сервер c NFS-сервером.
+Заходим на сервер: kodotusnfsserver 
+Дальнейшие действия выполняются от пользователя root. Переходим в
+root пользователя
+```
+oleg@kodotusnfsserver:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsserver:~#
+
+```
+
+Установим сервер NFS:
+
+```
+root@kodotusnfsserver:~# apt install nfs-kernel-server
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 nfs-common rpcbind
+Suggested packages:
+  watchdog
+The following NEW packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 nfs-common nfs-kernel-server rpcbind
+0 upgraded, 6 newly installed, 0 to remove and 69 not upgraded.
+Need to get 660 kB of archives.
+After this operation, 2287 kB of additional disk space will be used.
+Do you want to continue? [Y/n] y
+```
+
+Настройки сервера находятся в файле /etc/nfs.conf
+Проверяем наличие слушающих портов 2049/udp, 2049/tcp,111/udp, 111/tcp (не все они будут использоваться далее, но их наличие сигнализирует о том, что необходимые сервисы готовы принимать внешние подключения):
+```
+root@kodotusnfsserver:~# ss -tnplu
+Netid        State         Recv-Q        Send-Q                     Local Address:Port                  Peer Address:Port        Process
+udp          UNCONN        0             0                                0.0.0.0:111                        0.0.0.0:*            users:(("rpcbind",pid=14564,fd=5),("systemd",pid=1,fd=93))
+udp          UNCONN        0             0                                   [::]:111                           [::]:*            users:(("rpcbind",pid=14564,fd=7),("systemd",pid=1,fd=95))
+tcp          LISTEN        0             4096                             0.0.0.0:111                        0.0.0.0:*            users:(("rpcbind",pid=14564,fd=4),("systemd",pid=1,fd=92))
+tcp          LISTEN        0             64                               0.0.0.0:2049                       0.0.0.0:*
+tcp          LISTEN        0             4096                                [::]:111                           [::]:*            users:(("rpcbind",pid=14564,fd=6),("systemd",pid=1,fd=94))
+tcp          LISTEN        0             64                                  [::]:2049                          [::]:*
+```
+
+Создаём и настраиваем директорию, которая будет экспортирована в будущем
+```
+root@kodotusnfsserver:~# mkdir -p /srv/share/upload
+root@kodotusnfsserver:~# chown -R nobody:nogroup /srv/share
+root@kodotusnfsserver:~# chmod 0777 /srv/share/upload
+root@kodotusnfsserver:~# ls -la /srv/share
+total 12
+drwxr-xr-x 3 nobody nogroup 4096 Aug  7 10:34 .
+drwxr-xr-x 3 root   root    4096 Aug  7 10:34 ..
+drwxrwxrwx 2 nobody nogroup 4096 Aug  7 10:34 upload
+root@kodotusnfsserver:~#
+
+```
+
+Cоздаём в файле /etc/exports структуру, которая позволит экспортировать ранее созданную директорию:
+```
+root@kodotusnfsserver:~# cat << EOF > /etc/exports
+/srv/share 192.168.90.26/24(rw,sync,root_squash)
+EOF
+root@kodotusnfsserver:~# cat /etc/exports
+/srv/share 192.168.90.26/24(rw,sync,root_squash)
+root@kodotusnfsserver:~#
+
+```
+
+Экспортируем ранее созданную директорию:
+```
+root@kodotusnfsserver:~# exportfs -r
+exportfs: /etc/exports [1]: Neither 'subtree_check' or 'no_subtree_check' specified for export "192.
+  Assuming default behaviour ('no_subtree_check').
+  NOTE: this default has changed since nfs-utils version 1.0.x
+```
+
+Проверяем экспортированную директорию следующей командой
+```
+root@kodotusnfsserver:/srv# exportfs -s
+/srv/share  192.168.90.26/24(sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,root_squash,no_all_squash)
+```
+
+
+**2. Настраиваем клиент NFS**
+
+Заходим на сервер: kodotusnfsc
+
+Дальнейшие действия выполняются от пользователя root. Переходим в
+root пользователя
+```
+oleg@kodotusnfsc:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsc:~#
+
+```
+
+Установим пакет с NFS-клиентом
+```
+root@kodotusnfsc:~# apt install nfs-common
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 rpcbind
+Suggested packages:
+  watchdog
+The following NEW packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 nfs-common rpcbind
+0 upgraded, 5 newly installed, 0 to remove and 69 not upgraded.
+Need to get 491 kB of archives.
+After this operation, 1680 kB of additional disk space will be used.
+Do you want to continue? [Y/n] y
+
+```
+
+Добавляем в /etc/fstab строку
+
+```
+root@kodotusnfsc:~# echo "192.168.90.215:/srv/share/ /mnt nfs vers=3,noauto,x-systemd.automount 0 0" >> /etc/fstab
+```
+и выполняем команды:
+```
+root@kodotusnfsc:~# systemctl daemon-reload
+root@kodotusnfsc:~# systemctl restart remote-fs.target
+```
+
+Отметим, что в данном случае происходит автоматическая генерация systemd units в каталоге /run/systemd/generator/, которые производят монтирование при первом обращении к каталогу /mnt/.
+Заходим в директорию /mnt/ и проверяем успешность монтирования:
+```
+root@kodotusnfsc:~# cd /mnt
+root@kodotusnfsc:/mnt# mount | grep mnt
+systemd-1 on /mnt type autofs (rw,relatime,fd=65,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=4496)
+192.168.90.215:/srv/share/ on /mnt type nfs (rw,relatime,vers=3,rsize=524288,wsize=524288,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,mountaddr=192.168.90.215,mountvers=3,mountport=59117,mountproto=udp,local_lock=none,addr=192.168.90.215)
+```
+
+Обратите внимание на `vers=3`, что соответствует NFSv3, как того требует задание.
+
+**3. Проверка работоспособности**
+
+● Заходим на сервер kodotusnfsserver.
+
+● Заходим в каталог
+```
+root@kodotusnfsserver:~# cd /srv/share/upload
+root@kodotusnfsserver:/srv/share/upload#
+```
+
+● Создаём тестовый файл touch check_file.
+```
+root@kodotusnfsserver:/srv/share/upload#  touch check_file
+root@kodotusnfsserver:/srv/share/upload# ls
+check_file
+```
+
+●Заходим на клиент kodotusnfsc
+
+● Заходим в каталог /mnt/upload.
+```
+root@kodotusnfsc:/mnt# cd /mnt/upload
+root@kodotusnfsc:/mnt/upload#
+```
+
+● Проверяем наличие ранее созданного файла.
+```
+root@kodotusnfsc:/mnt/upload# ls
+check_file
+```
+
+● Создаём тестовый файл touch client_file и проверяем, что файл успешно создан.
+
+```
+root@kodotusnfsc:/mnt/upload# touch client_file
+root@kodotusnfsc:/mnt/upload# ls
+check_file  client_file
+root@kodotusnfsc:/mnt/upload#
+```
+
+
+**4. Предварительно проверяем клиент**
+
+перезагружаем клиент;
+```
+root@kodotusnfsc:/mnt/upload# reboot now
+```
+заходим на клиент;
+```
+Last login: Mon Aug 11 20:43:27 2025 from 10.78.2.21
+oleg@kodotusnfsc:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsc:~#
+```
+заходим в каталог /mnt/upload и проверяем наличие ранее созданных файлов
+```
+root@kodotusnfsc:~# cd /mnt/upload/
+root@kodotusnfsc:/mnt/upload# ls
+check_file  client_file
+root@kodotusnfsc:/mnt/upload#
+```
+
+
+**5. Проверяем сервер**
+
+заходим на сервер kodotusnfsserver в отдельном окне терминала и перезагружаем сервер;
+```
+root@kodotusnfsserver:/srv/share/upload# reboot now
+
+```
+
+заходим на сервер kodotusnfsserver;
+```
+To restore this content, you can run the 'unminimize' command.
+Last login: Mon Aug 11 20:52:19 2025 from 10.78.2.21
+oleg@kodotusnfsserver:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsserver:~#
+```
+
+проверяем наличие файлов в каталоге /srv/share/upload/;
+```
+root@kodotusnfsserver:~# cd /srv/share/upload/
+root@kodotusnfsserver:/srv/share/upload# ls
+check_file  client_file
+root@kodotusnfsserver:/srv/share/upload#
+
+```
+проверяем экспорты exportfs -s;
+```
+root@kodotusnfsserver:/srv/share/upload# exportfs -s
+/srv/share  192.168.90.26/24(sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,root_squash,no_all_squash)
+root@kodotusnfsserver:/srv/share/upload#
+```
+проверяем работу RPC showmount -a 192.168.90.215.
+```
+root@kodotusnfsserver:/srv/share/upload# showmount -a
+All mount points on kodotusnfsserver:
+192.168.90.26:/srv/share
+root@kodotusnfsserver:/srv/share/upload#
+```
+
+**6. Проверяем клиент**
+
+возвращаемся на клиент и перезагружаем клиент;
+```
+root@kodotusnfsc:/mnt/upload# reboot now
+```
+
+заходим на клиент и проверяем работу RPC showmount -a 192.168.90.215;
+```
+oleg@kodotusnfsc:~$ showmount -a 192.168.90.215
+All mount points on 192.168.90.215:
+oleg@kodotusnfsc:~$
+
+```
+заходим в каталог /mnt/upload;
+```
+oleg@kodotusnfsc:~$ cd /mnt/upload
+oleg@kodotusnfsc:/mnt/upload$
+
+```
+проверяем статус монтирования mount | grep mnt;
+
+```
+oleg@kodotusnfsc:/mnt/upload$ mount | grep mnt
+systemd-1 on /mnt type autofs (rw,relatime,fd=66,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=3713)
+192.168.90.215:/srv/share/ on /mnt type nfs (rw,relatime,vers=3,rsize=524288,wsize=524288,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,mountaddr=192.168.90.215,mountvers=3,mountport=54734,mountproto=udp,local_lock=none,addr=192.168.90.215)
+oleg@kodotusnfsc:/mnt/upload$
+```
+
+проверяем наличие ранее созданных файлов;
+```
+oleg@kodotusnfsc:/mnt/upload$ ls
+check_file  client_file
+oleg@kodotusnfsc:/mnt/upload$ ls -la
+total 8
+drwxrwxrwx 2 nobody nogroup 4096 Aug 11 21:25 .
+drwxr-xr-x 3 nobody nogroup 4096 Aug  7 10:34 ..
+-rw-r--r-- 1 root   root       0 Aug 11 21:18 check_file
+-rw-r--r-- 1 nobody nogroup    0 Aug 11 21:25 client_file
+oleg@kodotusnfsc:/mnt/upload$
+```
+
+создаём тестовый файл touch final_check и проверяем, что файл успешно созданд;
+```
+oleg@kodotusnfsc:/mnt/upload$ touch final_check
+oleg@kodotusnfsc:/mnt/upload$ ls -la
+total 8
+drwxrwxrwx 2 nobody nogroup 4096 Aug 11 21:43 .
+drwxr-xr-x 3 nobody nogroup 4096 Aug  7 10:34 ..
+-rw-r--r-- 1 root   root       0 Aug 11 21:18 check_file
+-rw-r--r-- 1 nobody nogroup    0 Aug 11 21:25 client_file
+-rw-rw-r-- 1 oleg   oleg       0 Aug 11 21:43 final_check
+oleg@kodotusnfsc:/mnt/upload$
+
+```
+
+Проверки прошли успешно, это значит, что демонстрационный стенд работоспособен и готов к работе.
+
+
+
+**7. Настраиваем сервер NFS с помощью скрипта**
+
+Переустановил ОС на ВМ kodotusnfsserver.
+
+Заходим на сервер: kodotusnfsserver 
+Дальнейшие действия выполняются от пользователя root. Переходим в
+root пользователя
+```
+oleg@kodotusnfsserver:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsserver:~#
+
+```
+
+в домашней директории создаем скрипт nfss_script.sh
+
+```
+#!/bin/bash
+#Установка nfs сервера
+apt install nfs-kernel-server
+echo "Установка NFS server завершена"
+
+echo "Создаем директорию upload"
+mkdir -p /srv/share/upload
+echo "Изменяем владельца и права на директорию /srv/share"
+chown -R nobody:nogroup /srv/share
+
+echo "Изменяем владельца и права на директорию /srv/share"
+chmod 0777 /srv/share/upload
+
+echo "создаем файл exports"
+touch /etc/exports
+echo "/srv/share 192.168.90.26/24(rw,sync,root_squash)" > /etc/exports
+echo "файл export создан "
+
+echo "Экспортируем ранее созданную директорию"
+exportfs -r
+
+echo "Проверяем экспортированную директорию"
+exportfs -s
+
+echo "СЕРВЕР НАСТРОЕН!"
+```
+
+даем разрешение на запуск скрипта 
+
+root@kodotusnfsserver:/home/oleg# chmod +x nfss_script.sh
+
+запускаем скрипт 
+
+root@kodotusnfsserver:/home/oleg# ./nfss_script.sh
+результат отработки скрипта 
+```
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 nfs-common rpcbind
+
+Установка NFS server завершена
+Создаем директорию upload
+Изменяем владельца и права на директорию /srv/share
+Изменяем владельца и права на директорию /srv/share
+создаем файл export
+файл export создан
+Экспортируем ранее созданную директорию
+Проверяем экспортированную директорию
+СЕРВЕР НАСТРОЕН!
+
+```
+
+
+**8. Настраиваем клиент NFS**
+
+Переустановил ОС на сервере  kodotusnfsc.
+Заходим на сервер: kodotusnfsc
+
+Дальнейшие действия выполняются от пользователя root. Переходим в
+root пользователя
+
+```
+oleg@kodotusnfsc:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsc:~#
+```
+
+в домашней директории создаем скрипт nfsc_script.sh
+
+```
+#!/bin/bash
+#Установка nfs клиента 
+sudo apt install nfs-common
+echo "Установка NFS клиента завершена"
+
+echo "192.168.90.215:/srv/share/ /mnt nfs vers=3,noauto,x-systemd.automount 0 0" >> /etc/fstab
+echo "Внесены изменения в /etc/fstab "
+
+systemctl daemon-reload
+systemctl restart remote-fs.target
+
+echo "NFS КЛИЕНТ НАСТРОЕН! "
+```
+
+даем разрешение на запуск скрипта 
+
+root@kodotusnfsc:~#  chmod +x nfsс_script.sh
+
+запускаем скрипт 
+
+```
+root@kodnfsc:~# ./nfsс_script.sh
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+The following additional packages will be installed:
+  keyutils libevent-core-2.1-7t64 libnfsidmap1 rpcbind
+
+Установка NFS клиента завершена
+Внесены изменения в /etc/fstab
+NFS КЛИЕНТ НАСТРОЕН!
+
+```
+
+
+**9. Проверка работоспособности**
+
+● Заходим на сервер kodotusnfsserver.
+
+● Заходим в каталог
+```
+root@kodotusnfsserver:~# cd /srv/share/upload
+root@kodotusnfsserver:/srv/share/upload#
+```
+
+● Создаём тестовый файл touch check_file.
+```
+root@kodotusnfsserver:/srv/share/upload#  touch check_file
+root@kodotusnfsserver:/srv/share/upload# ls
+check_file
+```
+
+●Заходим на клиент kodotusnfsc
+
+● Заходим в каталог /mnt/upload.
+```
+root@kodotusnfsc:/mnt# cd /mnt/upload
+root@kodotusnfsc:/mnt/upload#
+```
+
+● Проверяем наличие ранее созданного файла.
+```
+root@kodotusnfsc:/mnt/upload# ls
+check_file
+```
+
+● Создаём тестовый файл touch client_file и проверяем, что файл успешно создан.
+
+```
+root@kodotusnfsc:/mnt/upload# touch client_file
+root@kodotusnfsc:/mnt/upload# ls
+check_file  client_file
+root@kodotusnfsc:/mnt/upload#
+```
+
+
+
+
+
+**10. Проверяем сервер**
+
+заходим на сервер kodotusnfsserver в отдельном окне терминала и перезагружаем сервер;
+```
+root@kodotusnfsserver:/srv/share/upload# reboot now
+
+```
+
+заходим на сервер kodotusnfsserver;
+```
+To restore this content, you can run the 'unminimize' command.
+Last login: Mon Aug 11 20:52:19 2025 from 10.78.2.21
+oleg@kodotusnfsserver:~$ sudo -i
+[sudo] password for oleg:
+root@kodotusnfsserver:~#
+```
+
+проверяем наличие файлов в каталоге /srv/share/upload/;
+```
+root@kodotusnfsserver:~# cd /srv/share/upload/
+root@kodotusnfsserver:/srv/share/upload# ls
+check_file  client_file
+root@kodotusnfsserver:/srv/share/upload#
+
+```
+проверяем экспорты exportfs -s;
+```
+root@kodotusnfsserver:/srv/share/upload# exportfs -s
+/srv/share  192.168.90.26/24(sync,wdelay,hide,no_subtree_check,sec=sys,rw,secure,root_squash,no_all_squash)
+root@kodotusnfsserver:/srv/share/upload#
+```
+проверяем работу RPC showmount -a 192.168.90.215.
+```
+root@kodotusnfsserver:/srv/share/upload# showmount -a
+All mount points on kodotusnfsserver:
+192.168.90.26:/srv/share
+root@kodotusnfsserver:/srv/share/upload#
+```
+
+**Проверяем клиент**
+возвращаемся на клиент и перезагружаем клиент;
+```
+root@kodotusnfsc:/mnt/upload# reboot now
+```
+
+заходим на клиент и проверяем работу RPC showmount -a 192.168.90.215;
+```
+oleg@kodotusnfsc:~$ showmount -a 192.168.90.215
+All mount points on 192.168.90.215:
+oleg@kodotusnfsc:~$
+
+```
+заходим в каталог /mnt/upload;
+```
+oleg@kodotusnfsc:~$ cd /mnt/upload
+oleg@kodotusnfsc:/mnt/upload$
+
+```
+проверяем статус монтирования mount | grep mnt;
+
+```
+oleg@kodotusnfsc:/mnt/upload$ mount | grep mnt
+systemd-1 on /mnt type autofs (rw,relatime,fd=66,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=3713)
+192.168.90.215:/srv/share/ on /mnt type nfs (rw,relatime,vers=3,rsize=524288,wsize=524288,namlen=255,hard,proto=tcp,timeo=600,retrans=2,sec=sys,mountaddr=192.168.90.215,mountvers=3,mountport=54734,mountproto=udp,local_lock=none,addr=192.168.90.215)
+oleg@kodotusnfsc:/mnt/upload$
+```
+
+проверяем наличие ранее созданных файлов;
+```
+oleg@kodotusnfsc:/mnt/upload$ ls
+check_file  client_file
+oleg@kodotusnfsc:/mnt/upload$ ls -la
+total 8
+drwxrwxrwx 2 nobody nogroup 4096 Aug 11 21:25 .
+drwxr-xr-x 3 nobody nogroup 4096 Aug  7 10:34 ..
+-rw-r--r-- 1 root   root       0 Aug 11 21:18 check_file
+-rw-r--r-- 1 nobody nogroup    0 Aug 11 21:25 client_file
+oleg@kodotusnfsc:/mnt/upload$
+```
+
+создаём тестовый файл touch final_check и проверяем, что файл успешно создан;
+```
+oleg@kodotusnfsc:/mnt/upload$ touch final_check
+oleg@kodotusnfsc:/mnt/upload$ ls -la
+total 8
+drwxrwxrwx 2 nobody nogroup 4096 Aug 11 21:43 .
+drwxr-xr-x 3 nobody nogroup 4096 Aug  7 10:34 ..
+-rw-r--r-- 1 root   root       0 Aug 11 21:18 check_file
+-rw-r--r-- 1 nobody nogroup    0 Aug 11 21:25 client_file
+-rw-rw-r-- 1 oleg   oleg       0 Aug 11 21:43 final_check
+oleg@kodotusnfsc:/mnt/upload$
+
+```
+
+Проверки прошли успешно, это значит, что демонстрационный стенд работоспособен и готов к работе.
