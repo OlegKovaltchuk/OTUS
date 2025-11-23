@@ -1,0 +1,148 @@
+# Задание
+
+1. Включить отображение меню Grub.
+    
+2. Попасть в систему без пароля несколькими способами.
+    
+3. Установить систему с LVM, после чего переименовать VG.
+    
+
+
+**Включить отображение меню Grub.**
+
+1. открываем файл 
+```
+nano /etc/default/grub
+```
+
+2. В фале комментируем строку, скрывающую меню и ставим задержку для выбора пункта меню в 10 секунд.
+
+```
+#GRUB_TIMEOUT_STYLE=hidden
+
+GRUB_TIMEOUT=10
+```
+
+3. Обновляем конфигурацию загрузчика и перезагружаемся для проверки.
+```
+root@kodnfsc:~# update-grub
+Sourcing file `/etc/default/grub'
+Generating grub configuration file ...
+Found linux image: /boot/vmlinuz-6.8.0-87-generic
+Found initrd image: /boot/initrd.img-6.8.0-87-generic
+Found linux image: /boot/vmlinuz-6.8.0-85-generic
+Found initrd image: /boot/initrd.img-6.8.0-85-generic
+Warning: os-prober will not be executed to detect other bootable partitions.
+Systems on them will not be added to the GRUB boot configuration.
+Check GRUB_DISABLE_OS_PROBER documentation entry.
+Adding boot menu entry for UEFI Firmware Settings ...
+done
+root@kodnfsc:~# reboot
+```
+
+Во время загрузки видим меню.
+![[Pasted image 20251120230525.png]]
+
+**Попасть в систему без пароля несколькими способами несколькими способами.**
+
+**Способ 1. init=/bin/bash**
+В конце строки, начинающейся с linux, добавляем init=/bin/bash и нажимаем сtrl-x для загрузки в систему.
+
+![[Pasted image 20251121000204.png]]
+
+после загрузки системы, перемонтировали файловую систему / в режиме rw. С помощью команды passwd установил новый пароль для учетной записи root.
+![[Pasted image 20251121001610.png]]
+
+
+**Способ 2. Recovery mode**
+
+В меню загрузчика на первом уровне выбрать второй пункт (Advanced options…), далее загрузить пункт меню с указанием recovery mode в названии.
+Во время загрузки получил меню режима восстановления. 
+
+![[Pasted image 20251123224928.png]]
+
+включаем поддержку сети (network) для того, чтобы файловая система перемонтировалась в режим read/write (либо это можно сделать вручную).
+
+![[Pasted image 20251123225012.png]]
+
+Далее выбираем пункт root и попадаем в консоль с пользователем root. 
+
+![[Pasted image 20251123225050.png]]
+
+В этой консоли можно производить любые манипуляции с системой.
+
+
+
+**Установить систему с LVM, после чего переименовать VG**
+
+Мы установили систему Ubuntu 22.04 со стандартной разбивкой диска с использованием  LVM.
+
+смотрим текущее состояние системы:
+
+```
+root@kodotus01:~# df -h
+Filesystem                         Size  Used Avail Use% Mounted on
+tmpfs                              392M  936K  391M   1% /run
+/dev/mapper/ubuntu--vg-ubuntu--lv   14G  7.5G  5.6G  58% /
+tmpfs                              2.0G     0  2.0G   0% /dev/shm
+tmpfs                              5.0M     0  5.0M   0% /run/lock
+/dev/sda2                          2.0G  287M  1.6G  16% /boot
+test_otus3                         832M  256K  832M   1% /test_otus3
+test_otus4                         832M  512K  831M   1% /test_otus4
+test_otus1                         832M  256K  832M   1% /test_otus1
+tmpfs                              392M   16K  392M   1% /run/user/1000
+
+root@kodotus01:~# vgs
+  VG        #PV #LV #SN Attr   VSize   VFree
+  ubuntu-vg   1   1   0 wz--n- <28.00g 14.00g
+root@kodotus01:~#
+```
+
+Название Volume Group в нашей системе - ubuntu-vg.
+
+Приступим к переименованию:
+```
+root@kodotus01:~# vgs
+  VG        #PV #LV #SN Attr   VSize   VFree
+  ubuntu-vg   1   1   0 wz--n- <28.00g 14.00g
+root@kodotus01:~# ^C
+root@kodotus01:~# vgrename ubuntu-vg ubuntu-otus
+  Volume group "ubuntu-vg" successfully renamed to "ubuntu-otus"
+root@kodotus01:~# vgs
+  VG          #PV #LV #SN Attr   VSize   VFree
+  ubuntu-otus   1   1   0 wz--n- <28.00g 14.00g
+root@kodotus01:~#
+```
+
+
+
+Далее правим /boot/grub/grub.cfg. Везде заменяем старое название VG на новое (в файле дефис меняется на два дефиса ubuntu--vg ubuntu--otus).
+
+```
+root@kodotus01:~# nano /boot/grub/grub.cfg
+root@kodotus01:~# cat /boot/grub/grub.cfg | grep /dev/mapper/ubuntu
+        linux   /vmlinuz-6.14.4-061404-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro
+                linux   /vmlinuz-6.14.4-061404-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro
+                linux   /vmlinuz-6.14.4-061404-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro recovery nomodeset dis_ucode_ldr
+                linux   /vmlinuz-6.8.0-87-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro
+                linux   /vmlinuz-6.8.0-87-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro recovery nomodeset dis_ucode_ldr
+                linux   /vmlinuz-6.8.0-60-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro
+                linux   /vmlinuz-6.8.0-60-generic root=/dev/mapper/ubuntu--otus-ubuntu--lv ro recovery nomodeset dis_ucode_ldr
+root@kodotus01:~#
+root@kodotus01:~# uptime
+ 20:13:27 up 15 min,  2 users,  load average: 0.00, 0.00, 0.00
+
+```
+
+Перезагружаем систему. Система успешно загрузилась с новым именем Volume Group. 
+
+```
+root@kodotus01:~# reboot
+root@kodotus01:~# uptime
+ 20:14:58 up 0 min,  2 users,  load average: 1.12, 0.32, 0.11
+root@kodotus01:~# vgs
+  VG          #PV #LV #SN Attr   VSize   VFree
+  ubuntu-otus   1   1   0 wz--n- <28.00g 14.00g
+root@kodotus01:~#
+```
+
